@@ -149,7 +149,7 @@ public class AuroraClassLoader extends URLClassLoader {
 
   private Class<?> findClassImpl(String name) throws ClassNotFoundException {
     String path = name.replace('.', '/').concat(".class");
-    ResourceAccessor res = accessor.ucp().getResource(path, false);
+    ResourceAccessor res = accessor.ucp().getResource(path);
     if (res == null) {
       throw new ClassNotFoundException(name);
     }
@@ -510,6 +510,7 @@ public class AuroraClassLoader extends URLClassLoader {
 
   private static final class UcpAccessor {
     private static final MethodHandle GET_RESOURCE_STRING_BOOLEAN = createGetResourceImpl();
+    private static final boolean JAVA_25_OR_HIGHER = GET_RESOURCE_STRING_BOOLEAN.type().parameterCount() == 1;
     private final Object ucp;
 
     public UcpAccessor(Object ucp) {
@@ -519,8 +520,14 @@ public class AuroraClassLoader extends URLClassLoader {
     private static MethodHandle createGetResourceImpl() {
       try {
         return UnsafeUtil.lookup().findVirtual(UCP_CLASS, "getResource", MethodType.methodType(RESOURCE_CLASS, String.class, boolean.class));
-      } catch (Throwable e) {
-        return UnsafeUtil.unsafeThrow(e);
+      } catch (NoSuchMethodException exception) {
+        try {
+          return UnsafeUtil.lookup().findVirtual(UCP_CLASS, "getResource", MethodType.methodType(RESOURCE_CLASS, String.class));
+        } catch (Throwable throwable) {
+          return UnsafeUtil.unsafeThrow(throwable);
+        }
+      } catch (Throwable throwable) {
+        return UnsafeUtil.unsafeThrow(throwable);
       }
     }
 
@@ -528,9 +535,14 @@ public class AuroraClassLoader extends URLClassLoader {
       return ucp;
     }
 
-    public ResourceAccessor getResource(String name, boolean check) {
+    public ResourceAccessor getResource(String name) {
       try {
-        Object resInstance = GET_RESOURCE_STRING_BOOLEAN.invoke(ucp, name, check);
+        Object resInstance;
+        if (JAVA_25_OR_HIGHER) {
+          resInstance = GET_RESOURCE_STRING_BOOLEAN.invoke(ucp, name);
+        } else {
+          resInstance = GET_RESOURCE_STRING_BOOLEAN.invoke(ucp, name, false);
+        }
         return resInstance == null ? null : new ResourceAccessor(resInstance);
       } catch (Throwable e) {
         return UnsafeUtil.unsafeThrow(e);
